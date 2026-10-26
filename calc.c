@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dirent.h>
 
 #define FIRST_NAME "<<atabay>>"
 #define LAST_NAME  "<<atabaev>>"
@@ -283,21 +284,87 @@ static int process_file(const char *in_path, const char *out_dir) {
     return status;
 }
 
-// 
+
 int main(int argc, char **argv) {
-    const char *out_dir = NULL;
-    const char *in_path = NULL;
+    const char *dir_arg = NULL;
+    const char *out_arg = NULL;
+    const char *in_arg = NULL;
+
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) out_dir = argv[++i];
-        else in_path = argv[i];
+        if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--dir") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: missing value after %s\n", argv[i]);
+                return 1;
+            }
+            dir_arg = argv[++i];
+        } else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output-dir") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Error: missing value after %s\n", argv[i]);
+                return 1;
+            }
+            out_arg = argv[++i];
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Error: unknown option '%s'\n", argv[i]);
+            return 1;
+        } else {
+            if (in_arg != NULL) {
+                fprintf(stderr, "Error: more than one input file\n");
+                return 1;
+            }
+            in_arg = argv[i];
+        }
     }
-    if (out_dir == NULL || in_path == NULL) {
-        fprintf(stderr, "Usage: %s -o OUTDIR input.txt\n", argv[0]);
+    if ((dir_arg == NULL) == (in_arg == NULL)) {  // neither or both
+        fprintf(stderr, "Usage: %s [-d DIR | --dir DIR] [-o OUTDIR | --output-dir OUTDIR] [input.txt]\n", argv[0]);
         return 1;
+    }
+
+   
+    DIR *dir = NULL;
+    if (in_arg != NULL) {
+        struct stat st;
+        if (stat(in_arg, &st) != 0 || !S_ISREG(st.st_mode)) {
+            fprintf(stderr, "Error: cannot read input file '%s'\n", in_arg);
+            return 1;
+        }
+    } else {
+        dir = opendir(dir_arg);
+        if (dir == NULL) {
+            fprintf(stderr, "Error: cannot open folder '%s': %s\n", dir_arg, strerror(errno));
+            return 1;
+        }
+    }
+
+    
+    char out_dir[4096];
+    if (out_arg != NULL) {
+        snprintf(out_dir, sizeof out_dir, "%s", out_arg);
+    } else {
+        char base[256];
+        if (dir_arg != NULL) base_name(dir_arg, base, 0);
+        else base_name(in_arg, base, 1);
+        snprintf(out_dir, sizeof out_dir, "%s_%s_%s", base, FIRST_NAME, STUDENT_ID);
     }
     if (mkdir(out_dir, 0777) != 0 && errno != EEXIST) {
         fprintf(stderr, "Error: cannot create '%s': %s\n", out_dir, strerror(errno));
+        if (dir != NULL) closedir(dir);
         return 1;
     }
-    return process_file(in_path, out_dir);
+
+    if (in_arg != NULL) return process_file(in_arg, out_dir);
+
+    
+    int status = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        size_t n = strlen(entry->d_name);
+        if (n <= 4 || strcmp(entry->d_name + n - 4, ".txt") != 0) continue;
+        char path[4096];
+        snprintf(path, sizeof path, "%s/%s", dir_arg, entry->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (process_file(path, out_dir) != 0) status = 1;
+    }
+    closedir(dir);
+    return status;
 }
