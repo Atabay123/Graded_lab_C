@@ -17,7 +17,7 @@
 #define LAST_NAME  "<<atabaev>>"
 #define STUDENT_ID "<<251adb244>>"
 
-enum { T_INT, T_PLUS, T_MINUS, T_END, T_BAD };
+enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_END, T_BAD };
 
 
 static char *buf;
@@ -58,6 +58,8 @@ static void next_token(void) {
     char c = buf[p];
     if (c == '+') { tok = T_PLUS; p++; }
     else if (c == '-') { tok = T_MINUS; p++; }
+     else if (c == '*') { tok = T_STAR; p++; }
+    else if (c == '/') { tok = T_SLASH; p++; }
     else if (isdigit((unsigned char)c)) {
         tok_int = 0;
         while (p < line_end && isdigit((unsigned char)buf[p])) {
@@ -84,13 +86,35 @@ static Value parse_primary(void) {
 }
 
 
-static Value parse_expr(void) {
+static Value parse_term(void) {
     Value left = parse_primary();
+    if (failed) return left;
+    while (tok == T_STAR || tok == T_SLASH) {
+        int op = tok;
+        next_token();
+        Value right = parse_primary();
+        if (failed) return left;
+        if (op == T_STAR) {
+            left.i = left.i * right.i;
+        } else {
+            if (right.i == 0) {
+                
+                fail(right.start);
+                return left;
+            }
+            left.i = left.i / right.i;  
+        }
+    }
+    return left;
+}
+
+static Value parse_expr(void) {
+    Value left = parse_term();
     if (failed) return left;
     while (tok == T_PLUS || tok == T_MINUS) {
         int op = tok;
         next_token();
-        Value right = parse_primary();
+        Value right = parse_term();
         if (failed) return left;
         if (op == T_PLUS) left.i = left.i + right.i;
         else left.i = left.i - right.i;
