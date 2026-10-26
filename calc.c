@@ -1,5 +1,4 @@
-// <<Atabay Atabaev 251ADB244>>
-// <<https://github.com/your-username/your-repo>>
+// <<Atabay Atabaev 251ADB244
 // Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
 // Resources used: <<only what you really used, plus your conversation share link>>
 
@@ -13,13 +12,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <math.h>
 
-#define FIRST_NAME "<<atabay>>"
-#define LAST_NAME  "<<atabaev>>"
-#define STUDENT_ID "<<251adb244>>"
+#define FIRST_NAME "atabay"
+#define LAST_NAME  "atabaev"
+#define STUDENT_ID "251adb244"
 
-enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_POW, T_LP, T_RP, T_END, T_BAD };
-
+enum { T_INT, T_FLOAT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_POW, T_LP, T_RP, T_END, T_BAD };
 
 static char *buf;
 static long len;
@@ -28,12 +27,15 @@ static long line_end;
 static int tok;       
 static long tok_pos;   
 static long long tok_int;
+static double tok_float;
 static int failed;     
 static long fail_pos;
 
 typedef struct {
+    int is_float;
     long long i;
-    long start; 
+    double f;
+    long start;
 } Value;
 
 
@@ -67,13 +69,24 @@ static void next_token(void) {
     else if (c == '/') { tok = T_SLASH; p++; }
         else if (c == '(') { tok = T_LP; p++; }
     else if (c == ')') { tok = T_RP; p++; }
-    else if (isdigit((unsigned char)c)) {
-        tok_int = 0;
-        while (p < line_end && isdigit((unsigned char)buf[p])) {
-            tok_int = tok_int * 10 + (buf[p] - '0');
+ else if (isdigit((unsigned char)c)) {
+        long start = p;
+        while (p < line_end && isdigit((unsigned char)buf[p])) p++;
+
+        if (p + 1 < line_end && buf[p] == '.' && isdigit((unsigned char)buf[p + 1])) {
             p++;
+            while (p < line_end && isdigit((unsigned char)buf[p])) p++;
+            
+            char saved = buf[p];
+            buf[p] = '\0';
+            tok_float = strtod(buf + start, NULL);
+            buf[p] = saved;
+            tok = T_FLOAT;
+        } else {
+            tok_int = 0;
+            for (long k = start; k < p; k++) tok_int = tok_int * 10 + (buf[k] - '0');
+            tok = T_INT;
         }
-        tok = T_INT;
     }
     else { tok = T_BAD; p++; }  
 }
@@ -82,31 +95,7 @@ static void next_token(void) {
 static Value parse_expr(void);
 
 
-static Value parse_primary(void) {
-    Value v = {0};
-    long start = tok_pos;
-    v.start = start;
-    if (tok == T_INT) {
-        v.i = tok_int;
-        next_token();
-    } else if (tok == T_LP) {
-        next_token();
-        v = parse_expr();
-        if (failed) return v;
-        
-        v.start = start;
-        if (tok == T_RP) {
-            next_token();
-        } else {
-            
-            fail(tok_pos);
-        }
-    } else {
 
-        fail(tok_pos);
-    }
-    return v;
-}
 
 
 static long long int_pow(long long base, long long exp) {
@@ -120,19 +109,71 @@ static long long int_pow(long long base, long long exp) {
 }
 
 
+
+static double to_double(Value v) {
+    if (v.is_float) return v.f;
+    return (double)v.i;
+}
+
+
+
+
+static Value parse_primary(void) {
+    Value v = {0};
+    long start = tok_pos;
+    v.start = start;
+    if (tok == T_INT) {
+        v.i = tok_int;
+        next_token();
+    } else if (tok == T_FLOAT) {
+        v.is_float = 1;
+        v.f = tok_float;
+        next_token();
+    } else if (tok == T_LP) {
+        next_token();
+        v = parse_expr();
+        if (failed) return v;
+
+        v.start = start;
+        if (tok == T_RP) {
+            next_token();
+        } else {
+
+            fail(tok_pos);
+        }
+    } else {
+       
+        fail(tok_pos);
+    }
+    return v;
+}
+
+
 static Value parse_power(void) {
     Value left = parse_primary();
     if (failed) return left;
     if (tok == T_POW) {
+        long op_pos = tok_pos;
         next_token();
         Value right = parse_power();
         if (failed) return left;
-        if (right.i < 0) {
+        if (!left.is_float && !right.is_float) {
+   
+            if (right.i < 0) {
+                fail(right.start); 
+                return left;
+            }
+            left.i = int_pow(left.i, right.i);
+        } else {
            
-            fail(right.start);
-            return left;
+            double r = pow(to_double(left), to_double(right));
+            if (isnan(r) || isinf(r)) {
+                fail(op_pos);  
+                return left;
+            }
+            left.is_float = 1;
+            left.f = r;
         }
-        left.i = int_pow(left.i, right.i);
     }
     return left;
 }
@@ -143,36 +184,68 @@ static Value parse_term(void) {
     if (failed) return left;
     while (tok == T_STAR || tok == T_SLASH) {
         int op = tok;
+        long op_pos = tok_pos;
         next_token();
         Value right = parse_power();
         if (failed) return left;
-        if (op == T_STAR) {
-            left.i = left.i * right.i;
+        if (op == T_SLASH && ((!right.is_float && right.i == 0) ||
+                              (right.is_float && right.f == 0.0))) {
+            fail(right.start);  
+            return left;
+        }
+        if (!left.is_float && !right.is_float) {
+            if (op == T_STAR) left.i = left.i * right.i;
+            else left.i = left.i / right.i;
         } else {
-            if (right.i == 0) {
-                
-                fail(right.start);
+            double a = to_double(left);
+            double b = to_double(right);
+            double r;
+            if (op == T_STAR) r = a * b;
+            else r = a / b;
+            if (isnan(r) || isinf(r)) {
+                fail(op_pos);
                 return left;
             }
-            left.i = left.i / right.i;  
+            left.is_float = 1;
+            left.f = r;
         }
     }
     return left;
 }
+
 
 static Value parse_expr(void) {
     Value left = parse_term();
     if (failed) return left;
     while (tok == T_PLUS || tok == T_MINUS) {
         int op = tok;
+        long op_pos = tok_pos;
         next_token();
         Value right = parse_term();
         if (failed) return left;
-        if (op == T_PLUS) left.i = left.i + right.i;
-        else left.i = left.i - right.i;
+        if (!left.is_float && !right.is_float) {
+            if (op == T_PLUS) left.i = left.i + right.i;
+            else left.i = left.i - right.i;
+        } else {
+            double a = to_double(left);
+            double b = to_double(right);
+            double r;
+            if (op == T_PLUS) r = a + b;
+            else r = a - b;
+            if (isnan(r) || isinf(r)) {
+                fail(op_pos);
+                return left;
+            }
+            left.is_float = 1;
+            left.f = r;
+        }
     }
     return left;
 }
+
+
+
+
 
 
 static char *out_text;
@@ -255,7 +328,8 @@ static int process_file(const char *in_path, const char *out_dir) {
         if (failed) break;
 
         char text[64];
-        snprintf(text, sizeof text, "%lld\n", v.i);
+        if (v.is_float) snprintf(text, sizeof text, "%.15g\n", v.f);
+        else snprintf(text, sizeof text, "%lld\n", v.i);
         add_text(text);
     }
 
