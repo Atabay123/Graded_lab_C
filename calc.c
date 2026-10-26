@@ -17,7 +17,7 @@
 #define LAST_NAME  "<<atabaev>>"
 #define STUDENT_ID "<<251adb244>>"
 
-enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_LP, T_RP, T_END, T_BAD };
+enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_POW, T_LP, T_RP, T_END, T_BAD };
 
 
 static char *buf;
@@ -58,7 +58,11 @@ static void next_token(void) {
     char c = buf[p];
     if (c == '+') { tok = T_PLUS; p++; }
     else if (c == '-') { tok = T_MINUS; p++; }
-     else if (c == '*') { tok = T_STAR; p++; }
+    else if (c == '*') {
+        
+        if (p + 1 < line_end && buf[p + 1] == '*') { tok = T_POW; p += 2; }
+        else { tok = T_STAR; p++; }
+    }
     else if (c == '/') { tok = T_SLASH; p++; }
         else if (c == '(') { tok = T_LP; p++; }
     else if (c == ')') { tok = T_RP; p++; }
@@ -104,13 +108,42 @@ static Value parse_primary(void) {
 }
 
 
-static Value parse_term(void) {
+static long long int_pow(long long base, long long exp) {
+    long long result = 1;
+    while (exp > 0) {
+        if (exp & 1) result = result * base;
+        exp = exp >> 1;
+        if (exp > 0) base = base * base;
+    }
+    return result;
+}
+
+
+static Value parse_power(void) {
     Value left = parse_primary();
+    if (failed) return left;
+    if (tok == T_POW) {
+        next_token();
+        Value right = parse_power();
+        if (failed) return left;
+        if (right.i < 0) {
+           
+            fail(right.start);
+            return left;
+        }
+        left.i = int_pow(left.i, right.i);
+    }
+    return left;
+}
+
+
+static Value parse_term(void) {
+    Value left = parse_power();
     if (failed) return left;
     while (tok == T_STAR || tok == T_SLASH) {
         int op = tok;
         next_token();
-        Value right = parse_primary();
+        Value right = parse_power();
         if (failed) return left;
         if (op == T_STAR) {
             left.i = left.i * right.i;
@@ -210,6 +243,9 @@ static int process_file(const char *in_path, const char *out_dir) {
         while (cursor < len && buf[cursor] != '\n') cursor++;
         line_end = cursor;
         if (cursor < len) cursor++;  
+         long k = start;
+        while (k < line_end && (buf[k] == ' ' || buf[k] == '\t')) k++;
+        if (k == line_end || buf[k] == '#') continue;  
         p = start;
         next_token();
         Value v = parse_expr();
