@@ -17,7 +17,7 @@
 #define LAST_NAME  "<<atabaev>>"
 #define STUDENT_ID "<<251adb244>>"
 
-enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_END, T_BAD };
+enum { T_INT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_LP, T_RP, T_END, T_BAD };
 
 
 static char *buf;
@@ -60,6 +60,8 @@ static void next_token(void) {
     else if (c == '-') { tok = T_MINUS; p++; }
      else if (c == '*') { tok = T_STAR; p++; }
     else if (c == '/') { tok = T_SLASH; p++; }
+        else if (c == '(') { tok = T_LP; p++; }
+    else if (c == ')') { tok = T_RP; p++; }
     else if (isdigit((unsigned char)c)) {
         tok_int = 0;
         while (p < line_end && isdigit((unsigned char)buf[p])) {
@@ -72,14 +74,30 @@ static void next_token(void) {
 }
 
 
+static Value parse_expr(void);
+
+
 static Value parse_primary(void) {
     Value v = {0};
-    v.start = tok_pos;
+    long start = tok_pos;
+    v.start = start;
     if (tok == T_INT) {
         v.i = tok_int;
         next_token();
+    } else if (tok == T_LP) {
+        next_token();
+        v = parse_expr();
+        if (failed) return v;
+        
+        v.start = start;
+        if (tok == T_RP) {
+            next_token();
+        } else {
+            
+            fail(tok_pos);
+        }
     } else {
-       
+
         fail(tok_pos);
     }
     return v;
